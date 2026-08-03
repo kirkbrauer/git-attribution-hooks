@@ -462,6 +462,37 @@ else
 fi
 git checkout -q "$main_branch"
 
+echo "# agent pushing"
+
+git checkout -q -b feature/agent-push
+commit_with "feat: pushable work"
+if AI_AGENT=test-agent git push -q origin HEAD 2>"$work/ap1"; then
+	ok "an agent may push by default"
+else
+	bad "an agent may push by default"
+	sed 's/^/    | /' "$work/ap1"
+fi
+
+git config attribution.push.agent deny
+commit_with "feat: more work"
+if AI_AGENT=test-agent git push -q origin HEAD 2>"$work/ap2"; then
+	bad "attribution.push.agent=deny refuses an agent's push"
+elif grep -q "push refused" "$work/ap2"; then
+	ok "attribution.push.agent=deny refuses an agent's push"
+else
+	bad "attribution.push.agent=deny refuses an agent's push (wrong error)"
+	sed 's/^/    | /' "$work/ap2"
+fi
+
+if git push -q origin HEAD 2>"$work/ap3"; then
+	ok "you can still push while agents are denied"
+else
+	bad "you can still push while agents are denied"
+	sed 's/^/    | /' "$work/ap3"
+fi
+git config --unset attribution.push.agent
+git checkout -q "$main_branch"
+
 echo "# commit signatures"
 
 git config attribution.push.requireSignature true

@@ -116,6 +116,29 @@ Be honest with yourself about the trade: the sign-off is written before you
 have read anything, so it means what you make it mean. If you want a mechanism
 rather than a habit, both of the following are one config away.
 
+### Enforcing it
+
+One switch tightens every layer at once:
+
+```sh
+git config --global attribution.signoff human
+```
+
+`prepare-commit-msg` stops signing an agent's commits and strips a sign-off in
+your name that an agent wrote itself; `pre-push` starts asking for confirmation
+on the terminal; and the Claude Code `PreToolUse` hook (see below) stops an
+agent skipping that prompt with `git signoff --yes`. Add either of these to
+taste:
+
+```sh
+git config --global attribution.push.confirm always   # confirm every publish
+git config --global attribution.push.agent   deny     # agents may not push at all
+```
+
+`attribution.push.agent deny` is the blunt one. It keeps an agent from pushing
+anything, which also keeps its work from reaching a pull request, so it costs
+you a real amount of agentic workflow. That is why it is off by default.
+
 ### Prompting at push time
 
 `attribution.push.confirm always` makes `pre-push` list every assisted commit
@@ -168,6 +191,7 @@ Any git config scope, so you can vary it per repo.
 | --- | --- | --- |
 | `attribution.signoff` | `auto` | `auto` = always sign, review locally; `human` = never sign an agent's commit, certify later with `git signoff`; `off` = never sign |
 | `attribution.push.confirm` | `never` | `never` = no prompt; `always` = confirm any push carrying an assisted, already-signed commit; `protected` = only for `main` etc. |
+| `attribution.push.agent` | `allow` | `deny` refuses any push made from a coding agent's session, whatever its sign-off state |
 | `attribution.push.protect` | `main master trunk` | branch patterns that refuse unsigned commits |
 | `attribution.push.requireSignoff` | `true` | disable the push gate entirely |
 | `attribution.push.requireSignature` | `false` | also require a valid commit signature |
@@ -215,7 +239,7 @@ git clone https://github.com/kirkbrauer/git-attribution-hooks ~/dotfiles/git-att
 ./test.sh
 ```
 
-45 tests, in a throwaway repo with `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM`
+48 tests, in a throwaway repo with `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM`
 neutered, so they never touch your real configuration. They clear the agent
 environment variables themselves, so the suite behaves the same whether or not
 you run it from inside a coding agent.

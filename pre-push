@@ -33,6 +33,38 @@ if [ -z "$email" ]; then
 	exit 1
 fi
 
+# Is a coding agent driving this push? Every one of these is set by the tool
+# itself, not by the shell, so it survives into hooks.
+agent_session() {
+	[ -n "${GIT_ATTRIBUTION_AGENT:-}" ] ||
+	[ -n "${AI_AGENT:-}" ] ||
+	[ -n "${CLAUDECODE:-}" ] ||
+	[ -n "${CLAUDE_CODE_SESSION_ID:-}" ] ||
+	[ -n "${CODEX_SANDBOX:-}" ] ||
+	[ -n "${CODEX_SESSION_ID:-}" ] ||
+	[ -n "${CURSOR_AGENT:-}" ] ||
+	[ -n "${COPILOT_AGENT:-}" ] ||
+	[ -n "${AIDER_CHAT:-}" ]
+}
+
+# attribution.push.agent: allow (default) | deny
+# Agents push by default -- blocking it stops work reaching a pull request and
+# gets in the way of an agentic workflow. Set deny if you would rather every
+# push be yours.
+case "$(git config --get attribution.push.agent 2>/dev/null || echo allow)" in
+deny|false|no|off|0)
+	if agent_session; then
+		echo >&2
+		echo "push refused: attribution.push.agent is 'deny', so pushes must" >&2
+		echo "come from you rather than a coding agent." >&2
+		echo >&2
+		echo "Push from your own shell, or allow it with:" >&2
+		echo "    git config --global attribution.push.agent allow" >&2
+		echo >&2
+		exit 1
+	fi ;;
+esac
+
 protected="$(git config --get attribution.push.protect 2>/dev/null || echo 'main master trunk')"
 
 is_protected() {
