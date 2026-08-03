@@ -301,13 +301,17 @@ fi
 echo "# agent sessions"
 
 AS_AGENT=1
-check "by default an agent's commit is not signed off" \
+check "by default an agent signs off too" \
 "fix: default policy
 
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>" \
 "fix: default policy
 
-Assisted-by: Claude:claude-opus-5"
+Assisted-by: Claude:claude-opus-5
+$SOB"
+
+# The rest of this section exercises the stricter opt-in policy.
+git config attribution.signoff human
 check "an agent commit is attributed but not signed off" \
 "fix: q
 
@@ -358,8 +362,6 @@ echo "# push gate"
 origin="$work/origin.git"
 git init -q --bare "$origin"
 git remote add origin "$origin"
-# The review prompt has its own section; keep it out of the way here.
-git config attribution.push.confirm never
 
 AS_AGENT=1
 commit_with "feat: unsigned agent work
@@ -518,8 +520,25 @@ echo "# review prompt at push time"
 
 git config attribution.push.requireSignature false
 
-# The point of the default policy: an unsigned assisted commit certifies
-# nothing, so an agent may publish it for review without asking anyone.
+# By default there is no prompt at all: an agent commits, signs, and pushes,
+# and you review locally.
+git config attribution.signoff auto
+git checkout -q -b feature/default-push
+AS_AGENT=1
+commit_with "feat: signed by the agent
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
+AS_AGENT=0
+if git push -q origin HEAD 2>"$work/free0"; then
+	ok "by default an agent pushes its own signed work with no prompt"
+else
+	bad "by default an agent pushes its own signed work with no prompt"
+	sed 's/^/    | /' "$work/free0"
+fi
+git checkout -q "$main_branch"
+
+# Opting in to the stricter policy: an unsigned assisted commit certifies
+# nothing, so it still needs no confirmation.
 git config attribution.signoff human
 git config attribution.push.confirm always
 git checkout -q -b feature/unsigned-push

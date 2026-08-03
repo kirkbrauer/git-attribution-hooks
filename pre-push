@@ -58,12 +58,12 @@ sigcount=0
 assisted=""
 protected_assisted=""
 
-# attribution.push.confirm: always (default) | protected | never
-#   always    -- confirm any push containing agent-assisted commits
-#   protected -- only when pushing to a protected branch, so feature
+# attribution.push.confirm: never (default) | always | protected
+#   never     -- no prompt; you review locally as a matter of practice
+#   always    -- confirm any push carrying an assisted, already-signed commit
+#   protected -- as always, but only for protected branches, so feature
 #                branches can be reviewed on the forge instead
-#   never     -- no prompt
-confirm_mode="$(git config --get attribution.push.confirm 2>/dev/null || echo always)"
+confirm_mode="$(git config --get attribution.push.confirm 2>/dev/null || echo never)"
 
 # Commits you have already confirmed, so re-pushing a branch does not re-ask.
 reviewed_file="$(git rev-parse --git-dir)/attribution-reviewed"
