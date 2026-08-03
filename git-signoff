@@ -46,15 +46,38 @@ name="$(git config --get user.name 2>/dev/null || true)"
 
 esc_email="$(printf '%s' "$email" | sed 's/[].[^$*\/]/\\&/g')"
 
-# Without an explicit base, consider everything not yet on any remote -- the
-# same set the pre-push hook will refuse. That works before a branch has an
-# upstream, which is exactly when you have unsigned work.
+# Without an explicit base, consider everything on this branch that is not yet
+# on the default branch. Not "everything unpushed": the whole point is to push
+# a feature branch first and review it on the forge, by which time the commits
+# are on a remote and an unpushed-only scope would find nothing.
 if [ -n "$base" ]; then
 	candidates="$(git rev-list "$base..HEAD" 2>/dev/null || true)"
 	scope="$base..HEAD"
 else
-	candidates="$(git rev-list HEAD --not --remotes 2>/dev/null || true)"
-	scope="commits not yet pushed"
+	default_ref=""
+	for cand in \
+		"$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || true)" \
+		origin/main origin/master origin/trunk main master trunk
+	do
+		[ -n "$cand" ] || continue
+		if git rev-parse --verify --quiet "$cand" >/dev/null 2>&1; then
+			default_ref="$cand"; break
+		fi
+	done
+
+	candidates=""
+	if [ -n "$default_ref" ] &&
+	   merge_base="$(git merge-base HEAD "$default_ref" 2>/dev/null)" &&
+	   [ "$merge_base" != "$(git rev-parse HEAD)" ]; then
+		candidates="$(git rev-list "$merge_base..HEAD" 2>/dev/null || true)"
+		scope="$default_ref..HEAD"
+	fi
+	if [ -z "$candidates" ]; then
+		# On the default branch itself, or no remote at all: fall back to
+		# whatever has not been pushed anywhere.
+		candidates="$(git rev-list HEAD --not --remotes 2>/dev/null || true)"
+		scope="commits not yet pushed"
+	fi
 fi
 
 unsigned=""
