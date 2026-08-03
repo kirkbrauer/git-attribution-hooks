@@ -171,13 +171,14 @@ agent_session() {
 	[ -n "${AIDER_CHAT:-}" ]
 }
 
-# attribution.signoff: auto (default) | human | off
-#   auto  -- always sign, whoever is committing. The review gate moves to
-#            push time, where pre-push asks you to confirm.
-#   human -- sign your own commits, never an agent's. Agent commits are
-#            certified later with `git signoff`, which rewrites them.
+# attribution.signoff: human (default) | auto | off
+#   human -- sign your own commits, never an agent's. An agent's commits are
+#            unsigned, so they claim nothing and can be pushed for review
+#            freely; you certify them afterwards with `git signoff`.
+#   auto  -- always sign, whoever is committing. pre-push then asks you to
+#            confirm before publishing a certification you have not earned.
 #   off   -- never sign
-policy="$(git config --get attribution.signoff 2>/dev/null || echo auto)"
+policy="$(git config --get attribution.signoff 2>/dev/null || echo human)"
 
 case "$policy" in
 off)

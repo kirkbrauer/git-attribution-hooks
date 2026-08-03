@@ -150,10 +150,13 @@ while read -r _local_ref local_oid remote_ref remote_oid; do
 		parents="$(git show -s --format=%P "$sha" 2>/dev/null || true)"
 		case "$parents" in *' '*) continue ;; esac
 
-		# Collect assisted commits before the signed-off check below skips
-		# out: under the default policy every commit is already signed, and
-		# those are exactly the ones the review prompt is for.
-		if git show -s --format=%B "$sha" | grep -qi '^Assisted-by:'; then
+		# The review prompt is for commits that are assisted AND already
+		# carry your sign-off: those publish a certification you may not
+		# have earned. An unsigned assisted commit claims nothing, so it
+		# needs no confirmation and an agent may push it freely.
+		if git show -s --format=%B "$sha" | grep -qi '^Assisted-by:' &&
+		   git show -s --format=%B "$sha" |
+		   grep -qiE "^Signed-off-by:.*<$(printf '%s' "$email" | sed 's/[].[^$*\/]/\\&/g')>[[:space:]]*$"; then
 			assisted="$assisted $sha"
 			if is_protected "$remote_ref"; then
 				protected_assisted="$protected_assisted $sha"

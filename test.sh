@@ -301,17 +301,13 @@ fi
 echo "# agent sessions"
 
 AS_AGENT=1
-check "by default an agent's commit is signed off too" \
+check "by default an agent's commit is not signed off" \
 "fix: default policy
 
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>" \
 "fix: default policy
 
-Assisted-by: Claude:claude-opus-5
-$SOB"
-
-# The rest of this section exercises the stricter policy.
-git config attribution.signoff human
+Assisted-by: Claude:claude-opus-5"
 check "an agent commit is attributed but not signed off" \
 "fix: q
 
@@ -520,8 +516,27 @@ git config --unset attribution.push.requireSignature
 
 echo "# review prompt at push time"
 
-git config attribution.signoff auto
 git config attribution.push.requireSignature false
+
+# The point of the default policy: an unsigned assisted commit certifies
+# nothing, so an agent may publish it for review without asking anyone.
+git config attribution.signoff human
+git config attribution.push.confirm always
+git checkout -q -b feature/unsigned-push
+AS_AGENT=1
+commit_with "feat: unsigned assisted work
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
+AS_AGENT=0
+if git push -q origin HEAD 2>"$work/free1"; then
+	ok "an agent can push unsigned assisted work with no prompt"
+else
+	bad "an agent can push unsigned assisted work with no prompt"
+	sed 's/^/    | /' "$work/free1"
+fi
+git checkout -q "$main_branch"
+
+git config attribution.signoff auto
 git checkout -q -b feature/review-prompt
 AS_AGENT=1
 commit_with "feat: assisted and already signed
@@ -531,11 +546,11 @@ AS_AGENT=0
 
 git config attribution.push.confirm always
 if git push -q origin HEAD 2>"$work/confirm1"; then
-	bad "an unreviewed assisted commit blocks the push"
+	bad "an assisted commit already signed blocks the push"
 elif grep -q "have not been reviewed" "$work/confirm1"; then
-	ok "an unreviewed assisted commit blocks the push"
+	ok "an assisted commit already signed blocks the push"
 else
-	bad "an unreviewed assisted commit blocks the push (wrong error)"
+	bad "an assisted commit already signed blocks the push (wrong error)"
 	sed 's/^/    | /' "$work/confirm1"
 fi
 
