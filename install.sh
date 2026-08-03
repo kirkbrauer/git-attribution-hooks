@@ -205,10 +205,11 @@ cat <<EOF
 
 Installed.
 
-  Your commits      ->  Assisted-by: + Signed-off-by:
-  An agent's commits->  Assisted-by: only, never signed in your name
-  git signoff       ->  review, then certify (and sign, if configured)
-  git push          ->  refuses unsigned commits on a protected branch
+  Every commit    ->  Assisted-by: + Signed-off-by:, whoever ran git commit
+  You            ->  read the diff before pushing. Nothing enforces this;
+                     see "What each layer can and cannot guarantee" in the
+                     README for the opt-ins that do.
+  git push        ->  refuses unsigned commits on a protected branch
 
 Uninstall with: $uninstall_cmd
 EOF
