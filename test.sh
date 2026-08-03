@@ -387,6 +387,20 @@ else
 	sed 's/^/    | /' "$work/so.log"
 fi
 
+# Not just HEAD: certifying some of the range and silently leaving the rest
+# is the failure mode this guards.
+missing=0
+for s in $(git rev-list "origin/$main_branch..HEAD" 2>/dev/null || git rev-list HEAD); do
+	p="$(git show -s --format=%P "$s")"
+	case "$p" in *' '*) continue ;; esac
+	git show -s --format=%B "$s" | grep -qF "$SOB" || missing=$((missing + 1))
+done
+if [ "$missing" -eq 0 ]; then
+	ok "every commit in the range is signed, not just the tip"
+else
+	bad "every commit in the range is signed, not just the tip ($missing missing)"
+fi
+
 if git log -1 --format=%B | grep -qF "$SOB"; then
 	ok "the signed commit carries exactly one sign-off"
 	if [ "$(git log -1 --format=%B | grep -c '^Signed-off-by:')" = "1" ]; then

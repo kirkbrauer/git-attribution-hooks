@@ -157,10 +157,32 @@ case "$(git config --get commit.gpgsign 2>/dev/null || echo false)" in
 true|yes|on|1) sign_flag="--gpg-sign" ;;
 esac
 
+# Replay with message hooks disabled. This rebase exists only to add a
+# trailer, the messages have already been through prepare-commit-msg once, and
+# letting it run again over them has been observed to swallow the sign-off git
+# is trying to add -- leaving exactly the commits you asked to certify
+# uncertified. Nothing here needs the hook, so take it out of the loop.
+no_hooks="$(git rev-parse --git-dir)/attribution-no-hooks"
+
 if [ -n "$rebase_onto" ]; then
-	git rebase --signoff $sign_flag "$rebase_onto" >/dev/null
+	git -c core.hooksPath="$no_hooks" rebase --signoff $sign_flag "$rebase_onto" >/dev/null
 else
-	git rebase --root --signoff $sign_flag >/dev/null
+	git -c core.hooksPath="$no_hooks" rebase --root --signoff $sign_flag >/dev/null
+fi
+
+# Verify rather than assume: the whole point is that these are certified.
+still_unsigned=0
+for _s in $(git rev-list "${rebase_onto:-}${rebase_onto:+..}HEAD" 2>/dev/null || git rev-list HEAD); do
+	_p="$(git show -s --format=%P "$_s")"
+	case "$_p" in *' '*) continue ;; esac
+	git show -s --format=%B "$_s" |
+		grep -qiE "^Signed-off-by:.*<$esc_email>[[:space:]]*$" ||
+		still_unsigned=$((still_unsigned + 1))
+done
+if [ "$still_unsigned" -gt 0 ]; then
+	echo "error: $still_unsigned commit(s) are still unsigned after the rebase." >&2
+	echo "Nothing was certified. Please report this." >&2
+	exit 1
 fi
 echo
 echo "Signed off $count commit(s). Note this rewrote them, so their hashes changed."
