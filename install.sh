@@ -43,7 +43,10 @@ while [ $# -gt 0 ]; do
 	--force) force=1; shift ;;
 	--uninstall) uninstall=1; shift ;;
 	--no-verify) verify=0; shift ;;
-	-h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+	-h|--help)
+		if [ -r "$0" ]; then sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
+		else echo "see $REPO_RAW/$REF/README.md"; fi
+		exit 0 ;;
 	*) die "unknown option: $1" ;;
 	esac
 done
@@ -185,6 +188,13 @@ if [ "$verify" -eq 1 ]; then
 	rm -rf "$probe"
 fi
 
+# $0 is "sh" when piped from curl, so only suggest it if it is a real path.
+if [ -r "$0" ]; then
+	uninstall_cmd="$0 --uninstall"
+else
+	uninstall_cmd="curl -fsSL $REPO_RAW/$REF/install.sh | sh -s -- --uninstall"
+fi
+
 cat <<EOF
 
 Installed. Commits now end with, for example:
@@ -192,5 +202,5 @@ Installed. Commits now end with, for example:
     Assisted-by: Claude:claude-opus-5
     Signed-off-by: $(git config --get user.name 2>/dev/null || echo 'Your Name') <$(git config --get user.email 2>/dev/null || echo 'you@example.com')>
 
-Uninstall with: $0 --uninstall
+Uninstall with: $uninstall_cmd
 EOF
