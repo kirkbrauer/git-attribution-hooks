@@ -126,9 +126,8 @@ git config --global attribution.signoff human
 
 `prepare-commit-msg` stops signing an agent's commits and strips a sign-off in
 your name that an agent wrote itself; `pre-push` starts asking for confirmation
-on the terminal; and the Claude Code `PreToolUse` hook (see below) stops an
-agent skipping that prompt with `git signoff --yes`. Add either of these to
-taste:
+on the terminal; and the [Claude Code hook](#claude-code) stops an agent
+skipping that prompt with `git signoff --yes`. Add either of these to taste:
 
 ```sh
 git config --global attribution.push.confirm always   # confirm every publish
@@ -160,6 +159,50 @@ commits, so the follow-up push needs `--force-with-lease`.
 `git signoff --yes` skips the terminal prompt. It exists so an agent can apply
 the sign-off *after* you have reviewed, but it removes the only check the
 script can make, so never put it in an agent allowlist.
+
+## Claude Code
+
+`claude-code/block-dco-bypass.sh` is a `PreToolUse` hook that stops an agent
+skipping the git hooks with `git push --no-verify`, `git commit --no-verify`
+or `-n`. It reads `attribution.signoff`, so under `human` it also blocks
+`git signoff --yes`, and under the default it does not — an agent that already
+signs at commit time should be able to repair its own commits.
+
+Copy it and register it yourself; the installer deliberately does not edit
+your Claude Code settings.
+
+```sh
+mkdir -p ~/.claude/hooks
+cp claude-code/block-dco-bypass.sh ~/.claude/hooks/
+chmod +x ~/.claude/hooks/block-dco-bypass.sh
+```
+
+Then merge this into `~/.claude/settings.json`, keeping anything already
+there:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "command": "$HOME/.claude/hooks/block-dco-bypass.sh", "timeout": 10 }
+        ]
+      }
+    ]
+  }
+}
+```
+
+It matches on the command string, so it will also block a command that merely
+*contains* those flags — echoing them into a file, say. That is a deliberate
+trade for a simple, auditable matcher. You can always run the command yourself
+with a leading `!` in the Claude Code prompt box.
+
+This layer is worth what an agent's cooperation is worth: it is enforced by
+the harness rather than by the model, but it only covers tools routed through
+that harness.
 
 ## Supported agents
 
