@@ -42,9 +42,10 @@ something you pre-authorised.
 
 | Layer | Guarantee |
 | --- | --- |
-| `pre-push` asks you to confirm assisted commits on `/dev/tty` | **Genuinely un-fakeable.** A coding agent has no controlling terminal — opening `/dev/tty` fails with `No such device or address`. This is the one check an agent cannot answer, and it is where the default policy puts the human. |
+| Reading the diff before you push (the default) | **None, mechanically.** It is a habit. That is a legitimate choice — most DCO sign-offs in the wild work this way — but do not mistake it for a control. |
+| `pre-push` confirmation on `/dev/tty` (`attribution.push.confirm always`) | **Genuinely un-fakeable.** A coding agent has no controlling terminal — opening `/dev/tty` fails with `No such device or address`. This is the one check an agent cannot answer. |
 | `pre-push` refuses unsigned commits on protected branches | A guardrail, not a sandbox. `git push --no-verify` skips it. |
-| `prepare-commit-msg` refuses to sign in an agent session (`attribution.signoff human`) | Off by default. Detects `AI_AGENT`, `CLAUDECODE`, `CODEX_*`, … and strips a sign-off in your name the agent wrote itself. An agent that unsets those variables defeats it. |
+| `prepare-commit-msg` refuses to sign in an agent session (`attribution.signoff human`) | Detects `AI_AGENT`, `CLAUDECODE`, `CODEX_*`, … and strips a sign-off in your name the agent wrote itself. An agent that unsets those variables defeats it. |
 | CI DCO check (`.github/workflows/dco.yml`) | **Real enforcement.** It runs on the forge, not your machine, so no local flag bypasses it. Make it a required status check. |
 | Commit signatures | Real *only* if the key cannot be used unattended — see below. |
 
@@ -93,28 +94,32 @@ hook it would displace, and finishes with a smoke test in a throwaway repo.
 
 ## The workflow
 
-Every commit is signed off as it is made, by you or by an agent. The review
-gate sits at push time, because that is when the certification is published
-and it is the last point where nothing has to be rewritten.
+Out of the box this is deliberately simple: every commit is signed off as it
+is made, by you or by an agent, and you read the diff before you push.
 
 ```
 commits            ->  Assisted-by: + Signed-off-by:, whoever ran git commit
-git push           ->  lists the assisted commits you have not confirmed and
-                       asks you to type "yes" on the terminal
-                   ->  an agent cannot answer, so it cannot publish
-                       unreviewed work; you push from your own shell
-                   ->  answers are remembered per commit, so re-pushing a
-                       branch does not ask again
+you review locally ->  git log -p, git diff. This is a habit, not a hook.
+git push           ->  goes; only protected branches are gated
 CI DCO check       ->  blocks the merge if anything is unsigned
 ```
 
 No history is rewritten and no force-push is needed.
 
-If you would rather review on the forge than in your terminal, set
-`attribution.push.confirm protected`: feature branches push without a prompt,
-and you are only asked when something reaches `main`.
+Be honest with yourself about the trade: the sign-off is written before you
+have read anything, so it means what you make it mean. If you want a mechanism
+rather than a habit, both of the following are one config away.
 
-### The stricter alternative
+### Prompting at push time
+
+`attribution.push.confirm always` makes `pre-push` list every assisted commit
+that already carries your sign-off and ask you to type "yes" on the terminal.
+A coding agent has no controlling terminal, so it cannot answer — it must hand
+the push back to you. Answers are recorded per commit in
+`.git/attribution-reviewed`, so re-pushing a branch does not ask again. Use
+`protected` instead to be asked only when something reaches `main`.
+
+### Withholding the sign-off entirely
 
 `attribution.signoff human` makes agent commits arrive with **no** sign-off at
 all. You then certify them afterwards with `git signoff`, which shows the
@@ -155,8 +160,8 @@ Any git config scope, so you can vary it per repo.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `attribution.signoff` | `auto` | `auto` = always sign, review at push time; `human` = never sign an agent's commit, certify later with `git signoff`; `off` = never sign |
-| `attribution.push.confirm` | `always` | `always` = confirm any push with assisted commits; `protected` = only for `main` etc., so feature branches can be reviewed on the forge; `never` = no prompt |
+| `attribution.signoff` | `auto` | `auto` = always sign, review locally; `human` = never sign an agent's commit, certify later with `git signoff`; `off` = never sign |
+| `attribution.push.confirm` | `never` | `never` = no prompt; `always` = confirm any push carrying an assisted, already-signed commit; `protected` = only for `main` etc. |
 | `attribution.push.protect` | `main master trunk` | branch patterns that refuse unsigned commits |
 | `attribution.push.requireSignoff` | `true` | disable the push gate entirely |
 | `attribution.push.requireSignature` | `false` | also require a valid commit signature |
@@ -204,7 +209,7 @@ git clone https://github.com/kirkbrauer/git-attribution-hooks ~/dotfiles/git-att
 ./test.sh
 ```
 
-43 tests, in a throwaway repo with `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM`
+45 tests, in a throwaway repo with `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM`
 neutered, so they never touch your real configuration. They clear the agent
 environment variables themselves, so the suite behaves the same whether or not
 you run it from inside a coding agent.
