@@ -157,5 +157,42 @@ ident="$(git var GIT_AUTHOR_IDENT 2>/dev/null || true)"
 [ -n "$ident" ] || exit 0
 signer="$(printf '%s' "$ident" | sed -E 's/^(.*<[^>]*>).*$/\1/')"
 
+# Is a coding agent driving this commit? Every one of these is set by the tool
+# itself, not by the shell, so it survives into hooks.
+agent_session() {
+	[ -n "${GIT_ATTRIBUTION_AGENT:-}" ] ||
+	[ -n "${AI_AGENT:-}" ] ||
+	[ -n "${CLAUDECODE:-}" ] ||
+	[ -n "${CLAUDE_CODE_SESSION_ID:-}" ] ||
+	[ -n "${CODEX_SANDBOX:-}" ] ||
+	[ -n "${CODEX_SESSION_ID:-}" ] ||
+	[ -n "${CURSOR_AGENT:-}" ] ||
+	[ -n "${COPILOT_AGENT:-}" ] ||
+	[ -n "${AIDER_CHAT:-}" ]
+}
+
+# attribution.signoff: human (default) | auto | off
+#   human -- sign your own commits, never an agent's
+#   auto  -- always sign, whoever is committing
+#   off   -- never sign
+policy="$(git config --get attribution.signoff 2>/dev/null || echo human)"
+
+case "$policy" in
+off)
+	exit 0 ;;
+auto)
+	;;
+*)
+	if agent_session; then
+		# Do not certify the DCO on the human's behalf for work they have not
+		# read. Also drop a sign-off in their name that the agent wrote into
+		# the message itself, which would otherwise sail straight through.
+		esc="$(printf '%s' "$signer" | sed -e 's/[][\\.^$*/]/\\&/g')"
+		sed -i.attrbak -E "/^Signed-off-by:[[:space:]]*$esc[[:space:]]*$/d" "$msg_file"
+		rm -f "$msg_file.attrbak"
+		exit 0
+	fi ;;
+esac
+
 git interpret-trailers --in-place --if-exists doNothing \
 	--trailer "Signed-off-by: $signer" "$msg_file"
