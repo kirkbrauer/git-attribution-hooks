@@ -96,8 +96,20 @@ confirm_reviewed() {
 		git show -s --format='          %(trailers:key=Assisted-by,valueonly,separator=%x20)' "$_sha" |
 			sed '/^ *$/d' >&2
 	done
+	# rev-list is newest-first, and $_pending has a leading space, so pick the
+	# ends by walking rather than by parameter expansion.
+	_newest=""
+	_oldest=""
+	for _sha in $_pending; do
+		[ -n "$_newest" ] || _newest="$_sha"
+		_oldest="$_sha"
+	done
 	echo >&2
-	echo "    git log -p $(git rev-parse --short "${_pending##* }")^..$(git rev-parse --short "${_pending%% *}")" >&2
+	if git rev-parse --quiet --verify "$_oldest^" >/dev/null 2>&1; then
+		echo "    git log -p $(git rev-parse --short "$_oldest")^..$(git rev-parse --short "$_newest")" >&2
+	else
+		echo "    git log -p $(git rev-parse --short "$_newest")" >&2
+	fi
 	echo >&2
 	echo "They already carry your Signed-off-by. Pushing publishes that" >&2
 	echo "certification, so confirm you have read them." >&2
