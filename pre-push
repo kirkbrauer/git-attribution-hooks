@@ -23,7 +23,7 @@ remote="${1:-origin}"
 
 require="$(git config --get attribution.push.requireSignoff 2>/dev/null || echo true)"
 case "$require" in false|no|off|0) exit 0 ;; esac
-case "$(git config --get attribution.signoff 2>/dev/null || echo human)" in
+case "$(git config --get attribution.signoff 2>/dev/null || echo auto)" in
 off) exit 0 ;;
 esac
 
