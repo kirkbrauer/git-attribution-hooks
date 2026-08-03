@@ -1,9 +1,13 @@
 # git-attribution-hooks
 
 Git hooks that convert AI coding agents' `Co-authored-by:` trailers into the
-Linux kernel's `Assisted-by:` format, and keep the DCO `Signed-off-by:` as
-something **you** do after reading the code — not something an agent stamps in
-your name.
+Linux kernel's `Assisted-by:` format, and add a DCO `Signed-off-by:` from the
+git identity of whatever repo you are in.
+
+By default this is a convenience: the sign-off goes on every commit and you
+read the diff before pushing. If you want the certification to be something an
+agent structurally cannot make on your behalf, two opt-ins below give you
+that, with an honest account of what each one is worth.
 
 ```diff
   fix: handle empty payload
@@ -31,8 +35,10 @@ that **agents must not add `Signed-off-by:` themselves** — only a human can
 certify the [Developer Certificate of Origin](https://developercertificate.org/).
 
 Which raises the obvious problem: a hook that appends your sign-off to every
-commit certifies agent-written code you have never read. That is the thing
-this repo is actually built around.
+commit certifies agent-written code you have never read. There is no way for a
+tool on your machine to fix that for you — see the table below for what is
+actually achievable — so the default keeps the convenience and names the
+trade, and the opt-ins tighten it if you want.
 
 ## What each layer can and cannot guarantee
 
