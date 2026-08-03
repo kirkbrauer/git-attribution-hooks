@@ -3,29 +3,33 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/kirkbrauer/git-attribution-hooks/main/install.sh | sh
 #
-# or, from a clone (symlinks, so `git pull` updates the hook):
+# or, from a clone (symlinks, so `git pull` updates everything):
 #
 #   ./install.sh
 #
 # Options:
 #   --dir <path>   where to install hooks   (default: ~/.git-hooks)
+#   --bin <path>   where to install git-signoff (default: ~/.local/bin)
 #   --link         symlink instead of copy  (default when run from a clone)
 #   --copy         copy instead of symlink
 #   --force        take over core.hooksPath even if it points somewhere else
-#   --uninstall    remove the hook and restore anything it displaced
+#   --uninstall    remove everything and restore anything displaced
 #   --no-verify    skip the post-install smoke test
 #
-# Environment: GIT_ATTRIBUTION_HOOKS_DIR, GIT_ATTRIBUTION_HOOKS_REF
+# Environment: GIT_ATTRIBUTION_HOOKS_DIR, GIT_ATTRIBUTION_BIN_DIR,
+#              GIT_ATTRIBUTION_HOOKS_REF
 
 set -eu
 
 REPO_RAW="https://raw.githubusercontent.com/kirkbrauer/git-attribution-hooks"
 REF="${GIT_ATTRIBUTION_HOOKS_REF:-main}"
-HOOK="prepare-commit-msg"
-MARKER="git-attribution-hooks: prepare-commit-msg"
+HOOKS="prepare-commit-msg pre-push"
+BIN_FILES="git-signoff"
+MARKER="git-attribution-hooks:"
 BACKUP_SUFFIX=".pre-git-attribution-hooks"
 
 hooks_dir="${GIT_ATTRIBUTION_HOOKS_DIR:-$HOME/.git-hooks}"
+bin_dir="${GIT_ATTRIBUTION_BIN_DIR:-$HOME/.local/bin}"
 mode=""
 force=0
 uninstall=0
@@ -38,13 +42,15 @@ while [ $# -gt 0 ]; do
 	case "$1" in
 	--dir) [ $# -ge 2 ] || die "--dir needs a path"; hooks_dir="$2"; shift 2 ;;
 	--dir=*) hooks_dir="${1#--dir=}"; shift ;;
+	--bin) [ $# -ge 2 ] || die "--bin needs a path"; bin_dir="$2"; shift 2 ;;
+	--bin=*) bin_dir="${1#--bin=}"; shift ;;
 	--link) mode="link"; shift ;;
 	--copy) mode="copy"; shift ;;
 	--force) force=1; shift ;;
 	--uninstall) uninstall=1; shift ;;
 	--no-verify) verify=0; shift ;;
 	-h|--help)
-		if [ -r "$0" ]; then sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
+		if [ -r "$0" ]; then sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'
 		else echo "see $REPO_RAW/$REF/README.md"; fi
 		exit 0 ;;
 	*) die "unknown option: $1" ;;
@@ -52,31 +58,26 @@ while [ $# -gt 0 ]; do
 done
 
 command -v git >/dev/null 2>&1 || die "git is not installed"
-
-# git interpret-trailers and core.hooksPath both predate git 2.9; anything
-# shipping on a supported macOS or Linux is fine, but check rather than assume.
 git interpret-trailers --help >/dev/null 2>&1 ||
 	die "this git has no 'interpret-trailers' (need git >= 2.9)"
-
-target="$hooks_dir/$HOOK"
-backup="$target$BACKUP_SUFFIX"
 
 is_ours() { [ -f "$1" ] && grep -q "$MARKER" "$1" 2>/dev/null; }
 
 # ---------------------------------------------------------------- uninstall
 if [ "$uninstall" -eq 1 ]; then
 	echo "Uninstalling git-attribution-hooks"
-	if [ -L "$target" ] || is_ours "$target"; then
-		rm -f "$target"; note "removed $target"
-	elif [ -e "$target" ]; then
-		note "left $target alone (not installed by this project)"
-	fi
-	if [ -e "$backup" ]; then
-		mv "$backup" "$target"; note "restored $target from backup"
-	fi
+	for f in $HOOKS; do
+		t="$hooks_dir/$f"; b="$t$BACKUP_SUFFIX"
+		if [ -L "$t" ] || is_ours "$t"; then rm -f "$t"; note "removed $t"
+		elif [ -e "$t" ]; then note "left $t alone (not ours)"; fi
+		[ -e "$b" ] && { mv "$b" "$t"; note "restored $t from backup"; }
+	done
+	for f in $BIN_FILES; do
+		t="$bin_dir/$f"
+		if [ -L "$t" ] || is_ours "$t"; then rm -f "$t"; note "removed $t"; fi
+	done
 	current="$(git config --global --get core.hooksPath 2>/dev/null || true)"
-	if [ "$current" = "$hooks_dir" ] && [ ! -e "$target" ]; then
-		# Only give up the setting if nothing else lives here.
+	if [ "$current" = "$hooks_dir" ]; then
 		if [ -z "$(ls -A "$hooks_dir" 2>/dev/null || true)" ]; then
 			git config --global --unset core.hooksPath
 			note "unset global core.hooksPath"
@@ -90,36 +91,36 @@ if [ "$uninstall" -eq 1 ]; then
 fi
 
 # ------------------------------------------------------------------ source
-# Running from a clone if the hook sits next to this script. When piped from
-# curl, $0 is not a real path, so guard the lookup.
-src=""
+src_dir=""
 case "$0" in
-*/*) cand="$(cd "$(dirname "$0")" 2>/dev/null && pwd)/$HOOK"
-     [ -f "$cand" ] && src="$cand" ;;
+*/*) cand="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
+     [ -f "$cand/prepare-commit-msg" ] && src_dir="$cand" ;;
 esac
 
-echo "Installing git-attribution-hooks into $hooks_dir"
+echo "Installing git-attribution-hooks"
 
-tmp=""
-if [ -z "$src" ]; then
+staged=""
+if [ -z "$src_dir" ]; then
 	[ "$mode" = "link" ] && die "--link requires running from a clone"
 	mode="copy"
-	tmp="$(mktemp "${TMPDIR:-/tmp}/gah.XXXXXX")"
-	trap 'rm -f "$tmp"' EXIT INT TERM
-	url="$REPO_RAW/$REF/$HOOK"
-	if command -v curl >/dev/null 2>&1; then
-		curl -fsSL "$url" -o "$tmp" || die "download failed: $url"
-	elif command -v wget >/dev/null 2>&1; then
-		wget -qO "$tmp" "$url" || die "download failed: $url"
-	else
-		die "need curl or wget to download the hook"
-	fi
-	is_ours "$tmp" || die "downloaded file is not the expected hook ($url)"
-	src="$tmp"
-	note "downloaded $HOOK @ $REF"
+	staged="$(mktemp -d "${TMPDIR:-/tmp}/gah.XXXXXX")"
+	trap 'rm -rf "$staged"' EXIT INT TERM
+	for f in $HOOKS $BIN_FILES; do
+		url="$REPO_RAW/$REF/$f"
+		if command -v curl >/dev/null 2>&1; then
+			curl -fsSL "$url" -o "$staged/$f" || die "download failed: $url"
+		elif command -v wget >/dev/null 2>&1; then
+			wget -qO "$staged/$f" "$url" || die "download failed: $url"
+		else
+			die "need curl or wget to download"
+		fi
+		is_ours "$staged/$f" || die "downloaded file is not the expected hook ($url)"
+	done
+	src_dir="$staged"
+	note "downloaded $HOOKS $BIN_FILES @ $REF"
 else
 	[ -n "$mode" ] || mode="link"
-	note "using $src"
+	note "using $src_dir"
 fi
 
 # ------------------------------------------------------------- hooksPath
@@ -139,27 +140,32 @@ if [ -n "$current" ] && [ "$current" != "$hooks_dir" ]; then
 	fi
 fi
 
-mkdir -p "$hooks_dir"
+install_one() {	# install_one <src> <dest>
+	_s="$1"; _d="$2"
+	if [ -e "$_d" ] && ! [ -L "$_d" ] && ! is_ours "$_d"; then
+		[ -e "$_d$BACKUP_SUFFIX" ] && die "refusing to overwrite backup $_d$BACKUP_SUFFIX"
+		mv "$_d" "$_d$BACKUP_SUFFIX"
+		note "moved your existing $(basename "$_d") aside -> $_d$BACKUP_SUFFIX"
+	fi
+	rm -f "$_d"
+	if [ "$mode" = "link" ]; then ln -s "$_s" "$_d"
+	else cat "$_s" >"$_d"; fi
+	chmod +x "$_d" 2>/dev/null || chmod +x "$_s"
+}
 
-# Preserve anything already sitting at the target that we did not put there.
-if [ -e "$target" ] && ! [ -L "$target" ] && ! is_ours "$target"; then
-	[ -e "$backup" ] && die "refusing to overwrite existing backup $backup"
-	mv "$target" "$backup"
-	note "moved your existing hook aside -> $backup"
-fi
-rm -f "$target"
-
-if [ "$mode" = "link" ]; then
-	ln -s "$src" "$target"
-	note "linked $target -> $src"
-else
-	cat "$src" >"$target"
-	note "wrote $target"
-fi
-chmod +x "$target" 2>/dev/null || chmod +x "$src"
+mkdir -p "$hooks_dir" "$bin_dir"
+for f in $HOOKS; do install_one "$src_dir/$f" "$hooks_dir/$f"; done
+note "installed $HOOKS in $hooks_dir"
+for f in $BIN_FILES; do install_one "$src_dir/$f" "$bin_dir/$f"; done
+note "installed $BIN_FILES in $bin_dir"
 
 git config --global core.hooksPath "$hooks_dir"
 note "set global core.hooksPath = $hooks_dir"
+
+case ":$PATH:" in
+*":$bin_dir:"*) ;;
+*) note "WARNING: $bin_dir is not on your PATH; 'git signoff' will not resolve" ;;
+esac
 
 # -------------------------------------------------------------- smoke test
 if [ "$verify" -eq 1 ]; then
@@ -168,6 +174,7 @@ if [ "$verify" -eq 1 ]; then
 		cd "$probe"
 		GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
 		export GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM
+		unset AI_AGENT CLAUDECODE CLAUDE_CODE_SESSION_ID GIT_ATTRIBUTION_AGENT || true
 		git init -q .
 		git config core.hooksPath "$hooks_dir"
 		git config user.name "Probe"
@@ -188,7 +195,6 @@ if [ "$verify" -eq 1 ]; then
 	rm -rf "$probe"
 fi
 
-# $0 is "sh" when piped from curl, so only suggest it if it is a real path.
 if [ -r "$0" ]; then
 	uninstall_cmd="$0 --uninstall"
 else
@@ -197,10 +203,13 @@ fi
 
 cat <<EOF
 
-Installed. Commits now end with, for example:
+Installed.
 
-    Assisted-by: Claude:claude-opus-5
-    Signed-off-by: $(git config --get user.name 2>/dev/null || echo 'Your Name') <$(git config --get user.email 2>/dev/null || echo 'you@example.com')>
+  Every commit    ->  Assisted-by: + Signed-off-by:, whoever ran git commit
+  You            ->  read the diff before pushing. Nothing enforces this;
+                     see "What each layer can and cannot guarantee" in the
+                     README for the opt-ins that do.
+  git push        ->  refuses unsigned commits on a protected branch
 
 Uninstall with: $uninstall_cmd
 EOF

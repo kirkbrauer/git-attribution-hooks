@@ -1,0 +1,261 @@
+#!/bin/sh
+# git-attribution-hooks: pre-push
+#
+# Refuses to push unsigned commits to a protected branch. Agents can commit
+# and push freely to feature branches -- that is how the work reaches a pull
+# request for you to read -- but nothing unsigned lands on main.
+#
+# Reads "<local ref> <local oid> <remote ref> <remote oid>" on stdin.
+#
+#   attribution.push.protect          branch names, space separated
+#                                     (default: "main master trunk")
+#   attribution.push.requireSignoff   false to disable entirely
+#
+# NOTE: `git push --no-verify` skips this hook, as it skips every pre-push
+# hook. This is a guardrail against the mistake, not a sandbox. Pair it with a
+# server-side DCO check for anything you actually need enforced.
+#
+# https://github.com/kirkbrauer/git-attribution-hooks
+
+set -e
+
+remote="${1:-origin}"
+
+require="$(git config --get attribution.push.requireSignoff 2>/dev/null || echo true)"
+case "$require" in false|no|off|0) exit 0 ;; esac
+case "$(git config --get attribution.signoff 2>/dev/null || echo auto)" in
+off) exit 0 ;;
+esac
+
+email="$(git config --get user.email 2>/dev/null || true)"
+if [ -z "$email" ]; then
+	echo "pre-push: user.email is not set, cannot verify sign-off" >&2
+	exit 1
+fi
+
+# Is a coding agent driving this push? Every one of these is set by the tool
+# itself, not by the shell, so it survives into hooks.
+agent_session() {
+	[ -n "${GIT_ATTRIBUTION_AGENT:-}" ] ||
+	[ -n "${AI_AGENT:-}" ] ||
+	[ -n "${CLAUDECODE:-}" ] ||
+	[ -n "${CLAUDE_CODE_SESSION_ID:-}" ] ||
+	[ -n "${CODEX_SANDBOX:-}" ] ||
+	[ -n "${CODEX_SESSION_ID:-}" ] ||
+	[ -n "${CURSOR_AGENT:-}" ] ||
+	[ -n "${COPILOT_AGENT:-}" ] ||
+	[ -n "${AIDER_CHAT:-}" ]
+}
+
+# attribution.push.agent: allow (default) | deny
+# Agents push by default -- blocking it stops work reaching a pull request and
+# gets in the way of an agentic workflow. Set deny if you would rather every
+# push be yours.
+case "$(git config --get attribution.push.agent 2>/dev/null || echo allow)" in
+deny|false|no|off|0)
+	if agent_session; then
+		echo >&2
+		echo "push refused: attribution.push.agent is 'deny', so pushes must" >&2
+		echo "come from you rather than a coding agent." >&2
+		echo >&2
+		echo "Push from your own shell, or allow it with:" >&2
+		echo "    git config --global attribution.push.agent allow" >&2
+		echo >&2
+		exit 1
+	fi ;;
+esac
+
+protected="$(git config --get attribution.push.protect 2>/dev/null || echo 'main master trunk')"
+
+is_protected() {
+	_branch="${1#refs/heads/}"
+	[ "$_branch" = "$1" ] && return 1		# not a branch ref (tag, note...)
+	for _p in $protected; do
+		# shellcheck disable=SC2254
+		case "$_branch" in $_p) return 0 ;; esac
+	done
+	return 1
+}
+
+require_sig=0
+case "$(git config --get attribution.push.requireSignature 2>/dev/null || echo false)" in
+true|yes|on|1) require_sig=1 ;;
+esac
+
+unsigned=""
+count=0
+loose=0
+unsigned_sig=""
+sigcount=0
+assisted=""
+protected_assisted=""
+
+# attribution.push.confirm: never (default) | always | protected
+#   never     -- no prompt; you review locally as a matter of practice
+#   always    -- confirm any push carrying an assisted, already-signed commit
+#   protected -- as always, but only for protected branches, so feature
+#                branches can be reviewed on the forge instead
+confirm_mode="$(git config --get attribution.push.confirm 2>/dev/null || echo never)"
+
+# Commits you have already confirmed, so re-pushing a branch does not re-ask.
+reviewed_file="$(git rev-parse --git-dir)/attribution-reviewed"
+
+confirm_reviewed() {
+	case "$confirm_mode" in never) return 0 ;; esac
+
+	case "$confirm_mode" in
+	protected) _list="$protected_assisted" ;;
+	*)         _list="$assisted" ;;
+	esac
+	[ -n "$_list" ] || return 0
+
+	_pending=""
+	_n=0
+	for _sha in $_list; do
+		if [ -f "$reviewed_file" ] && grep -qx "$_sha" "$reviewed_file" 2>/dev/null; then
+			continue
+		fi
+		_pending="$_pending $_sha"
+		_n=$((_n + 1))
+	done
+	[ "$_n" -gt 0 ] || return 0
+
+	echo >&2
+	echo "$_n commit(s) written with AI assistance have not been reviewed:" >&2
+	echo >&2
+	for _sha in $_pending; do
+		git show -s --format='    %h  %s' "$_sha" >&2
+		git show -s --format='          %(trailers:key=Assisted-by,valueonly,separator=%x20)' "$_sha" |
+			sed '/^ *$/d' >&2
+	done
+	# rev-list is newest-first, and $_pending has a leading space, so pick the
+	# ends by walking rather than by parameter expansion.
+	_newest=""
+	_oldest=""
+	for _sha in $_pending; do
+		[ -n "$_newest" ] || _newest="$_sha"
+		_oldest="$_sha"
+	done
+	echo >&2
+	if git rev-parse --quiet --verify "$_oldest^" >/dev/null 2>&1; then
+		echo "    git log -p $(git rev-parse --short "$_oldest")^..$(git rev-parse --short "$_newest")" >&2
+	else
+		echo "    git log -p $(git rev-parse --short "$_newest")" >&2
+	fi
+	echo >&2
+	echo "They already carry your Signed-off-by. Pushing publishes that" >&2
+	echo "certification, so confirm you have read them." >&2
+	echo >&2
+
+	if ! ( exec 3</dev/tty ) 2>/dev/null; then
+		echo "No terminal available, so this cannot be confirmed here." >&2
+		echo "Push from your own shell, or set:" >&2
+		echo "    git config attribution.push.confirm never" >&2
+		echo >&2
+		exit 1
+	fi
+	exec 3</dev/tty
+	printf 'Reviewed and ready to push? Type "yes": ' >&2
+	read -r _reply <&3 || _reply=""
+	exec 3<&-
+
+	case "$_reply" in
+	yes|YES|Yes) ;;
+	*) echo "Push aborted." >&2; exit 1 ;;
+	esac
+
+	for _sha in $_pending; do echo "$_sha" >>"$reviewed_file"; done
+}
+
+while read -r _local_ref local_oid remote_ref remote_oid; do
+	[ -n "$local_oid" ] || continue
+	case "$local_oid" in *[!0]*) ;; *) continue ;; esac	# branch deletion
+
+	case "$remote_oid" in
+	*[!0]*) range="$(git rev-list "$remote_oid..$local_oid" 2>/dev/null || true)" ;;
+	# New branch: everything not already somewhere on this remote.
+	*)      range="$(git rev-list "$local_oid" --not --remotes="$remote" 2>/dev/null || true)" ;;
+	esac
+
+	for sha in $range; do
+		# Merge commits carry no sign-off by design; skip them.
+		parents="$(git show -s --format=%P "$sha" 2>/dev/null || true)"
+		case "$parents" in *' '*) continue ;; esac
+
+		# The review prompt is for commits that are assisted AND already
+		# carry your sign-off: those publish a certification you may not
+		# have earned. An unsigned assisted commit claims nothing, so it
+		# needs no confirmation and an agent may push it freely.
+		if git show -s --format=%B "$sha" | grep -qi '^Assisted-by:' &&
+		   git show -s --format=%B "$sha" |
+		   grep -qiE "^Signed-off-by:.*<$(printf '%s' "$email" | sed 's/[].[^$*\/]/\\&/g')>[[:space:]]*$"; then
+			assisted="$assisted $sha"
+			if is_protected "$remote_ref"; then
+				protected_assisted="$protected_assisted $sha"
+			fi
+		fi
+
+		if git show -s --format=%B "$sha" |
+		   grep -qiE "^Signed-off-by:.*<$(printf '%s' "$email" | sed 's/[].[^$*\/]/\\&/g')>[[:space:]]*$"; then
+			continue
+		fi
+		if [ "$require_sig" = "1" ]; then
+			case "$(git log -1 --format='%G?' "$sha" 2>/dev/null || echo N)" in
+			G|U) ;;
+			*) unsigned_sig="$unsigned_sig $sha"; sigcount=$((sigcount + 1)) ;;
+			esac
+		fi
+		if is_protected "$remote_ref"; then
+			unsigned="$unsigned $sha"
+			count=$((count + 1))
+		else
+			loose=$((loose + 1))
+		fi
+	done
+done
+
+if [ "$sigcount" -gt 0 ]; then
+	echo >&2
+	echo "push rejected: $sigcount commit(s) carry no valid signature" >&2
+	echo >&2
+	for sha in $unsigned_sig; do
+		git show -s --format='    %h %s' "$sha" >&2
+	done
+	echo >&2
+	echo "Sign them while you certify them:" >&2
+	echo >&2
+	echo "    git signoff" >&2
+	echo >&2
+	echo "Disable with: git config attribution.push.requireSignature false" >&2
+	echo >&2
+	exit 1
+fi
+
+if [ "$count" -eq 0 ]; then
+	if [ "$loose" -gt 0 ]; then
+		echo >&2
+		echo "note: pushing $loose unsigned commit(s) to an unprotected branch." >&2
+		echo "      Review them there, then run 'git signoff' before they merge." >&2
+		echo >&2
+	fi
+	confirm_reviewed
+	exit 0
+fi
+
+echo >&2
+echo "push rejected: $count commit(s) bound for a protected branch have no" >&2
+echo "Signed-off-by for <$email>" >&2
+echo >&2
+for sha in $unsigned; do
+	git show -s --format='    %h %s' "$sha" >&2
+done
+echo >&2
+echo "Review them, then certify:" >&2
+echo >&2
+echo "    git signoff              # shows the diff, asks you to confirm" >&2
+echo >&2
+echo "Or, if you prefer to do it by hand:" >&2
+echo >&2
+echo "    git rebase --signoff $remote/\$(git rev-parse --abbrev-ref HEAD)" >&2
+echo >&2
+exit 1

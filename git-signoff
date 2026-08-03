@@ -1,0 +1,189 @@
+#!/bin/sh
+# git-attribution-hooks: git-signoff
+#
+# Review unsigned commits and certify the DCO on them. Installed on PATH as
+# `git-signoff`, so it runs as `git signoff`.
+#
+#   git signoff [<base>]
+#
+# <base> defaults to the branch's upstream, or to the merge-base with the
+# remote's default branch if there is no upstream.
+#
+# Options:
+#   --yes    skip the terminal prompt
+#
+# --yes exists so an agent can apply the sign-off *after* you have reviewed.
+# It removes the only check this script can actually make, so never put it in
+# an allowlist -- leave it as something your agent has to ask permission for
+# each time, and treat granting that permission as the act of certifying.
+#
+# https://github.com/kirkbrauer/git-attribution-hooks
+
+set -eu
+
+assume_yes=0
+base=""
+
+while [ $# -gt 0 ]; do
+	case "$1" in
+	--yes|-y) assume_yes=1; shift ;;
+	-h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+	-*) echo "unknown option: $1" >&2; exit 1 ;;
+	*) base="$1"; shift ;;
+	esac
+done
+
+git rev-parse --git-dir >/dev/null 2>&1 || { echo "not a git repository" >&2; exit 1; }
+
+if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+	echo "working tree is not clean; commit or stash first" >&2
+	exit 1
+fi
+
+email="$(git config --get user.email 2>/dev/null || true)"
+name="$(git config --get user.name 2>/dev/null || true)"
+[ -n "$email" ] && [ -n "$name" ] || { echo "set user.name and user.email first" >&2; exit 1; }
+
+esc_email="$(printf '%s' "$email" | sed 's/[].[^$*\/]/\\&/g')"
+
+# Without an explicit base, consider everything on this branch that is not yet
+# on the default branch. Not "everything unpushed": the whole point is to push
+# a feature branch first and review it on the forge, by which time the commits
+# are on a remote and an unpushed-only scope would find nothing.
+if [ -n "$base" ]; then
+	candidates="$(git rev-list "$base..HEAD" 2>/dev/null || true)"
+	scope="$base..HEAD"
+else
+	default_ref=""
+	for cand in \
+		"$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || true)" \
+		origin/main origin/master origin/trunk main master trunk
+	do
+		[ -n "$cand" ] || continue
+		if git rev-parse --verify --quiet "$cand" >/dev/null 2>&1; then
+			default_ref="$cand"; break
+		fi
+	done
+
+	candidates=""
+	if [ -n "$default_ref" ] &&
+	   merge_base="$(git merge-base HEAD "$default_ref" 2>/dev/null)" &&
+	   [ "$merge_base" != "$(git rev-parse HEAD)" ]; then
+		candidates="$(git rev-list "$merge_base..HEAD" 2>/dev/null || true)"
+		scope="$default_ref..HEAD"
+	fi
+	if [ -z "$candidates" ]; then
+		# On the default branch itself, or no remote at all: fall back to
+		# whatever has not been pushed anywhere.
+		candidates="$(git rev-list HEAD --not --remotes 2>/dev/null || true)"
+		scope="commits not yet pushed"
+	fi
+fi
+
+unsigned=""
+count=0
+for sha in $candidates; do
+	parents="$(git show -s --format=%P "$sha")"
+	case "$parents" in *' '*) continue ;; esac
+	if git show -s --format=%B "$sha" |
+	   grep -qiE "^Signed-off-by:.*<$esc_email>[[:space:]]*$"; then
+		continue
+	fi
+	unsigned="$unsigned $sha"
+	count=$((count + 1))
+done
+
+if [ "$count" -eq 0 ]; then
+	echo "Nothing to sign: $scope is already signed off."
+	exit 0
+fi
+
+# Rebase from the parent of the oldest unsigned commit. Already-signed commits
+# in between are replayed untouched; git will not add a duplicate trailer.
+oldest=""
+for sha in $unsigned; do oldest="$sha"; done
+if root_parent="$(git rev-parse --quiet --verify "$oldest^" 2>/dev/null)"; then
+	rebase_onto="$root_parent"
+	diff_range="$root_parent..HEAD"
+else
+	rebase_onto=""			# oldest unsigned commit is a root commit
+	diff_range="HEAD"
+fi
+
+echo
+echo "$count commit(s) in $scope are not signed off:"
+echo
+for sha in $unsigned; do
+	git show -s --format='    %h  %s' "$sha"
+	git show -s --format='          %an, %ar%n          %(trailers:key=Assisted-by,valueonly,separator=%x20)' "$sha" |
+		sed '/^ *$/d'
+done
+echo
+git diff --stat "$diff_range" | sed 's/^/    /'
+echo
+
+if [ "$assume_yes" -eq 1 ]; then
+	echo "Proceeding without a prompt (--yes)."
+else
+	cat <<EOF
+The Developer Certificate of Origin (https://developercertificate.org/) is a
+statement that you wrote this work or have the right to submit it under the
+project's licence. Review the diff above before answering.
+
+EOF
+	# Probe in a subshell: a failed redirection in this shell would abort the
+	# script and leak the shell's own error message. A coding agent has no
+	# controlling terminal, so this is the one check it cannot answer.
+	if ! ( exec 3</dev/tty ) 2>/dev/null; then
+		echo "no terminal available -- this must be answered by a human." >&2
+		echo "If you have already reviewed, re-run with --yes." >&2
+		exit 1
+	fi
+	exec 3</dev/tty
+	printf 'Sign off as %s <%s>? Type "yes" to certify: ' "$name" "$email"
+	read -r reply <&3 || reply=""
+	exec 3<&-
+	case "$reply" in
+	yes|YES|Yes) ;;
+	*) echo "Aborted; nothing was signed."; exit 1 ;;
+	esac
+fi
+
+# If the repo signs commits, sign them here too: this is the moment a human is
+# present, so it is the only moment a key that asks for a touch or passphrase
+# can actually be used.
+sign_flag=""
+case "$(git config --get commit.gpgsign 2>/dev/null || echo false)" in
+true|yes|on|1) sign_flag="--gpg-sign" ;;
+esac
+
+# Replay with message hooks disabled. This rebase exists only to add a
+# trailer, the messages have already been through prepare-commit-msg once, and
+# letting it run again over them has been observed to swallow the sign-off git
+# is trying to add -- leaving exactly the commits you asked to certify
+# uncertified. Nothing here needs the hook, so take it out of the loop.
+no_hooks="$(git rev-parse --git-dir)/attribution-no-hooks"
+
+if [ -n "$rebase_onto" ]; then
+	git -c core.hooksPath="$no_hooks" rebase --signoff $sign_flag "$rebase_onto" >/dev/null
+else
+	git -c core.hooksPath="$no_hooks" rebase --root --signoff $sign_flag >/dev/null
+fi
+
+# Verify rather than assume: the whole point is that these are certified.
+still_unsigned=0
+for _s in $(git rev-list "${rebase_onto:-}${rebase_onto:+..}HEAD" 2>/dev/null || git rev-list HEAD); do
+	_p="$(git show -s --format=%P "$_s")"
+	case "$_p" in *' '*) continue ;; esac
+	git show -s --format=%B "$_s" |
+		grep -qiE "^Signed-off-by:.*<$esc_email>[[:space:]]*$" ||
+		still_unsigned=$((still_unsigned + 1))
+done
+if [ "$still_unsigned" -gt 0 ]; then
+	echo "error: $still_unsigned commit(s) are still unsigned after the rebase." >&2
+	echo "Nothing was certified. Please report this." >&2
+	exit 1
+fi
+echo
+echo "Signed off $count commit(s). Note this rewrote them, so their hashes changed."
+git log --oneline ${rebase_onto:+"$rebase_onto..HEAD"} | sed 's/^/    /'
