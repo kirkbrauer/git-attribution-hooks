@@ -301,6 +301,17 @@ fi
 echo "# agent sessions"
 
 AS_AGENT=1
+check "by default an agent's commit is signed off too" \
+"fix: default policy
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>" \
+"fix: default policy
+
+Assisted-by: Claude:claude-opus-5
+$SOB"
+
+# The rest of this section exercises the stricter policy.
+git config attribution.signoff human
 check "an agent commit is attributed but not signed off" \
 "fix: q
 
@@ -335,20 +346,24 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>" \
 
 Assisted-by: Claude:claude-opus-5
 $SOB"
-git config --unset attribution.signoff
+git config attribution.signoff human
 
 AS_AGENT=0
 git config attribution.signoff off
 check "attribution.signoff=off never signs" \
 "fix: u" \
 "fix: u"
-git config --unset attribution.signoff
+# Everything below exercises the stricter policy, where agent commits arrive
+# unsigned and are certified later.
+git config attribution.signoff human
 
 echo "# push gate"
 
 origin="$work/origin.git"
 git init -q --bare "$origin"
 git remote add origin "$origin"
+# The review prompt has its own section; keep it out of the way here.
+git config attribution.push.confirm never
 
 AS_AGENT=1
 commit_with "feat: unsigned agent work
@@ -502,6 +517,55 @@ else
 	echo "skip - ssh-keygen unavailable, signature tests not run"
 fi
 git config --unset attribution.push.requireSignature
+
+echo "# review prompt at push time"
+
+git config attribution.signoff auto
+git config attribution.push.requireSignature false
+git checkout -q -b feature/review-prompt
+AS_AGENT=1
+commit_with "feat: assisted and already signed
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
+AS_AGENT=0
+
+git config attribution.push.confirm always
+if git push -q origin HEAD 2>"$work/confirm1"; then
+	bad "an unreviewed assisted commit blocks the push"
+elif grep -q "have not been reviewed" "$work/confirm1"; then
+	ok "an unreviewed assisted commit blocks the push"
+else
+	bad "an unreviewed assisted commit blocks the push (wrong error)"
+	sed 's/^/    | /' "$work/confirm1"
+fi
+
+if grep -q "No terminal available" "$work/confirm1"; then
+	ok "with no terminal the prompt cannot be answered by an agent"
+else
+	bad "with no terminal the prompt cannot be answered by an agent"
+fi
+
+git config attribution.push.confirm never
+if git push -q origin HEAD 2>"$work/confirm2"; then
+	ok "confirm=never pushes without asking"
+else
+	bad "confirm=never pushes without asking"
+	sed 's/^/    | /' "$work/confirm2"
+fi
+
+# Simulate having answered the prompt, then confirm it is not asked again.
+git rev-list "origin/$main_branch..HEAD" >"$(git rev-parse --git-dir)/attribution-reviewed"
+git config attribution.push.confirm always
+git commit -q --allow-empty -m "chore: nudge the branch"
+if git push -q origin HEAD 2>"$work/confirm3"; then
+	ok "already-reviewed commits are not queried again"
+else
+	bad "already-reviewed commits are not queried again"
+	sed 's/^/    | /' "$work/confirm3"
+fi
+
+git config attribution.push.confirm never
+git checkout -q "$main_branch"
 
 echo
 echo "$pass passed, $fail failed"

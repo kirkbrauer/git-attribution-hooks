@@ -55,6 +55,73 @@ count=0
 loose=0
 unsigned_sig=""
 sigcount=0
+assisted=""
+protected_assisted=""
+
+# attribution.push.confirm: always (default) | protected | never
+#   always    -- confirm any push containing agent-assisted commits
+#   protected -- only when pushing to a protected branch, so feature
+#                branches can be reviewed on the forge instead
+#   never     -- no prompt
+confirm_mode="$(git config --get attribution.push.confirm 2>/dev/null || echo always)"
+
+# Commits you have already confirmed, so re-pushing a branch does not re-ask.
+reviewed_file="$(git rev-parse --git-dir)/attribution-reviewed"
+
+confirm_reviewed() {
+	case "$confirm_mode" in never) return 0 ;; esac
+
+	case "$confirm_mode" in
+	protected) _list="$protected_assisted" ;;
+	*)         _list="$assisted" ;;
+	esac
+	[ -n "$_list" ] || return 0
+
+	_pending=""
+	_n=0
+	for _sha in $_list; do
+		if [ -f "$reviewed_file" ] && grep -qx "$_sha" "$reviewed_file" 2>/dev/null; then
+			continue
+		fi
+		_pending="$_pending $_sha"
+		_n=$((_n + 1))
+	done
+	[ "$_n" -gt 0 ] || return 0
+
+	echo >&2
+	echo "$_n commit(s) written with AI assistance have not been reviewed:" >&2
+	echo >&2
+	for _sha in $_pending; do
+		git show -s --format='    %h  %s' "$_sha" >&2
+		git show -s --format='          %(trailers:key=Assisted-by,valueonly,separator=%x20)' "$_sha" |
+			sed '/^ *$/d' >&2
+	done
+	echo >&2
+	echo "    git log -p $(git rev-parse --short "${_pending##* }")^..$(git rev-parse --short "${_pending%% *}")" >&2
+	echo >&2
+	echo "They already carry your Signed-off-by. Pushing publishes that" >&2
+	echo "certification, so confirm you have read them." >&2
+	echo >&2
+
+	if ! ( exec 3</dev/tty ) 2>/dev/null; then
+		echo "No terminal available, so this cannot be confirmed here." >&2
+		echo "Push from your own shell, or set:" >&2
+		echo "    git config attribution.push.confirm never" >&2
+		echo >&2
+		exit 1
+	fi
+	exec 3</dev/tty
+	printf 'Reviewed and ready to push? Type "yes": ' >&2
+	read -r _reply <&3 || _reply=""
+	exec 3<&-
+
+	case "$_reply" in
+	yes|YES|Yes) ;;
+	*) echo "Push aborted." >&2; exit 1 ;;
+	esac
+
+	for _sha in $_pending; do echo "$_sha" >>"$reviewed_file"; done
+}
 
 while read -r _local_ref local_oid remote_ref remote_oid; do
 	[ -n "$local_oid" ] || continue
@@ -70,6 +137,17 @@ while read -r _local_ref local_oid remote_ref remote_oid; do
 		# Merge commits carry no sign-off by design; skip them.
 		parents="$(git show -s --format=%P "$sha" 2>/dev/null || true)"
 		case "$parents" in *' '*) continue ;; esac
+
+		# Collect assisted commits before the signed-off check below skips
+		# out: under the default policy every commit is already signed, and
+		# those are exactly the ones the review prompt is for.
+		if git show -s --format=%B "$sha" | grep -qi '^Assisted-by:'; then
+			assisted="$assisted $sha"
+			if is_protected "$remote_ref"; then
+				protected_assisted="$protected_assisted $sha"
+			fi
+		fi
+
 		if git show -s --format=%B "$sha" |
 		   grep -qiE "^Signed-off-by:.*<$(printf '%s' "$email" | sed 's/[].[^$*\/]/\\&/g')>[[:space:]]*$"; then
 			continue
@@ -113,6 +191,7 @@ if [ "$count" -eq 0 ]; then
 		echo "      Review them there, then run 'git signoff' before they merge." >&2
 		echo >&2
 	fi
+	confirm_reviewed
 	exit 0
 fi
 
