@@ -168,32 +168,20 @@ or `-n`. It reads `attribution.signoff`, so under `human` it also blocks
 `git signoff --yes`, and under the default it does not — an agent that already
 signs at commit time should be able to repair its own commits.
 
-Copy it and register it yourself; the installer deliberately does not edit
-your Claude Code settings.
-
 ```sh
-mkdir -p ~/.claude/hooks
-cp claude-code/block-dco-bypass.sh ~/.claude/hooks/
-chmod +x ~/.claude/hooks/block-dco-bypass.sh
+./claude-code/install-claude-hook.sh              # register it
+./claude-code/install-claude-hook.sh --uninstall  # remove it
 ```
 
-Then merge this into `~/.claude/settings.json`, keeping anything already
-there:
+It is kept separate from the main installer, which never touches your Claude
+Code settings. It merges into `~/.claude/settings.json` with `jq` rather than
+replacing it, so other hooks and every unrelated setting survive; it is
+idempotent; it refuses to run against a settings file that is not valid JSON;
+and it keeps the previous file as `settings.json.bak`. `claude-code/test-install.sh`
+covers all of that against throwaway sandboxes.
 
-```json
-{
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          { "type": "command", "command": "$HOME/.claude/hooks/block-dco-bypass.sh", "timeout": 10 }
-        ]
-      }
-    ]
-  }
-}
-```
+Open `/hooks` in Claude Code once, or restart it, if the hook does not take
+effect immediately.
 
 It matches on the command string, so it will also block a command that merely
 *contains* those flags — echoing them into a file, say. That is a deliberate
