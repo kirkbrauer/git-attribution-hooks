@@ -210,6 +210,10 @@ matching no known agent pass through untouched, so human co-authors keep their
 credit. No optional tools are listed — the kernel reserves that field for
 analysis tools like coccinelle and sparse, not the agent or editor.
 
+Claude Code also appends a `Claude-Session:` trailer linking back to the chat
+session. The kernel AI-assistance format defines no such field, so the hook
+drops it — commit trailers stay `Assisted-by:` + `Signed-off-by:`.
+
 **Leave your agents' attribution enabled.** These hooks consume each agent's
 default trailer, so don't set Claude Code's `includeCoAuthoredBy` to `false` or
 disable Codex's `commit_attribution`, or there is nothing to convert.
@@ -270,7 +274,7 @@ git clone https://github.com/kirkbrauer/git-attribution-hooks ~/dotfiles/git-att
 ./test.sh
 ```
 
-48 tests, in a throwaway repo with `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM`
+51 tests, in a throwaway repo with `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_SYSTEM`
 neutered, so they never touch your real configuration. They clear the agent
 environment variables themselves, so the suite behaves the same whether or not
 you run it from inside a coding agent.
