@@ -24,7 +24,9 @@ export GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM
 # so clear anything the surrounding session may have set. (Running this suite
 # from inside a coding agent would otherwise suppress every sign-off.)
 unset GIT_ATTRIBUTION_AGENT AI_AGENT CLAUDECODE CLAUDE_CODE_SESSION_ID \
-      CODEX_SANDBOX CODEX_SESSION_ID CURSOR_AGENT COPILOT_AGENT AIDER_CHAT || true
+      CODEX_SANDBOX CODEX_SESSION_ID CODEX_THREAD_ID CURSOR_AGENT COPILOT_AGENT AIDER_CHAT \
+      PI_CODING_AGENT PI_SESSION_ID PI_MODEL PI_PROVIDER GIT_ATTRIBUTION_MODEL \
+      GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL || true
 
 hooks_dir="$work/hooks"
 mkdir -p "$hooks_dir"
@@ -38,7 +40,7 @@ export PATH
 repo="$work/repo"
 mkdir -p "$repo"
 cd "$repo"
-git init -q .
+git init -q -b main .
 git config core.hooksPath "$hooks_dir"
 git config user.name "Test Person"
 git config user.email "test@example.com"
@@ -408,7 +410,7 @@ fi
 # Not just HEAD: certifying some of the range and silently leaving the rest
 # is the failure mode this guards.
 missing=0
-for s in $(git rev-list "origin/$main_branch..HEAD" 2>/dev/null || git rev-list HEAD); do
+for s in $(git rev-list "origin/$branch..HEAD" 2>/dev/null || git rev-list HEAD); do
 	p="$(git show -s --format=%P "$s")"
 	case "$p" in *' '*) continue ;; esac
 	git show -s --format=%B "$s" | grep -qF "$SOB" || missing=$((missing + 1))

@@ -35,6 +35,15 @@ done
 
 git rev-parse --git-dir >/dev/null 2>&1 || { echo "not a git repository" >&2; exit 1; }
 
+# Enforce the human-only opt-in at the point of certification as well as in
+# harness guards. This resolves the actual target repo, including git -C.
+if [ "$assume_yes" -eq 1 ] &&
+   [ "$(git config --get attribution.signoff 2>/dev/null || echo auto)" = human ] &&
+   [ -n "${GIT_ATTRIBUTION_AGENT:-}${AI_AGENT:-}${CLAUDECODE:-}${CLAUDE_CODE_SESSION_ID:-}${CODEX_SANDBOX:-}${CODEX_SESSION_ID:-}${CODEX_THREAD_ID:-}${PI_CODING_AGENT:-}${PI_SESSION_ID:-}${CURSOR_AGENT:-}${COPILOT_AGENT:-}${AIDER_CHAT:-}" ]; then
+	echo "attribution.signoff is human: run git signoff from your own shell after reviewing" >&2
+	exit 1
+fi
+
 if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
 	echo "working tree is not clean; commit or stash first" >&2
 	exit 1
@@ -44,7 +53,7 @@ email="$(git config --get user.email 2>/dev/null || true)"
 name="$(git config --get user.name 2>/dev/null || true)"
 [ -n "$email" ] && [ -n "$name" ] || { echo "set user.name and user.email first" >&2; exit 1; }
 
-esc_email="$(printf '%s' "$email" | sed 's/[].[^$*\/]/\\&/g')"
+esc_email="$(printf '%s' "$email" | sed 's/[][\\.^$*+?(){}|\/]/\\&/g')"
 
 # Without an explicit base, consider everything on this branch that is not yet
 # on the default branch. Not "everything unpushed": the whole point is to push
@@ -148,6 +157,13 @@ EOF
 	*) echo "Aborted; nothing was signed."; exit 1 ;;
 	esac
 fi
+
+# Git rebase --signoff uses the committer identity, not user.* directly.
+# Pin it to the config identity shown in the confirmation, even when this
+# shell inherited a personal/corporate override from another repository.
+GIT_COMMITTER_NAME="$name"
+GIT_COMMITTER_EMAIL="$email"
+export GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL
 
 # If the repo signs commits, sign them here too: this is the moment a human is
 # present, so it is the only moment a key that asks for a touch or passphrase
