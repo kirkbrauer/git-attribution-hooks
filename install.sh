@@ -174,7 +174,10 @@ if [ "$verify" -eq 1 ]; then
 		cd "$probe"
 		GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
 		export GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM
-		unset AI_AGENT CLAUDECODE CLAUDE_CODE_SESSION_ID GIT_ATTRIBUTION_AGENT || true
+		unset AI_AGENT CLAUDECODE CLAUDE_CODE_SESSION_ID GIT_ATTRIBUTION_AGENT \
+		      GIT_ATTRIBUTION_MODEL CODEX_SANDBOX CODEX_SESSION_ID CODEX_THREAD_ID \
+		      PI_CODING_AGENT PI_SESSION_ID PI_MODEL PI_PROVIDER \
+		      GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL || true
 		git init -q .
 		git config core.hooksPath "$hooks_dir"
 		git config user.name "Probe"
@@ -206,9 +209,9 @@ cat <<EOF
 Installed.
 
   Every commit    ->  Assisted-by: + Signed-off-by:, whoever ran git commit
-  You            ->  read the diff before pushing. Nothing enforces this;
-                     see "What each layer can and cannot guarantee" in the
-                     README for the opt-ins that do.
+  Agent          ->  push a feature branch and open a GitHub PR / GitLab MR
+  You            ->  review before merge; enforce approvals on the forge
+  Optional       ->  attribution.push.confirm always for local push review
   git push        ->  refuses unsigned commits on a protected branch
 
 Uninstall with: $uninstall_cmd

@@ -28,6 +28,7 @@ off) exit 0 ;;
 esac
 
 email="$(git config --get user.email 2>/dev/null || true)"
+esc_email="$(printf '%s' "$email" | sed 's/[][\\.^$*+?(){}|\/]/\\&/g')"
 if [ -z "$email" ]; then
 	echo "pre-push: user.email is not set, cannot verify sign-off" >&2
 	exit 1
@@ -42,6 +43,9 @@ agent_session() {
 	[ -n "${CLAUDE_CODE_SESSION_ID:-}" ] ||
 	[ -n "${CODEX_SANDBOX:-}" ] ||
 	[ -n "${CODEX_SESSION_ID:-}" ] ||
+	[ -n "${CODEX_THREAD_ID:-}" ] ||
+	[ -n "${PI_CODING_AGENT:-}" ] ||
+	[ -n "${PI_SESSION_ID:-}" ] ||
 	[ -n "${CURSOR_AGENT:-}" ] ||
 	[ -n "${COPILOT_AGENT:-}" ] ||
 	[ -n "${AIDER_CHAT:-}" ]
@@ -188,22 +192,23 @@ while read -r _local_ref local_oid remote_ref remote_oid; do
 		# needs no confirmation and an agent may push it freely.
 		if git show -s --format=%B "$sha" | grep -qi '^Assisted-by:' &&
 		   git show -s --format=%B "$sha" |
-		   grep -qiE "^Signed-off-by:.*<$(printf '%s' "$email" | sed 's/[].[^$*\/]/\\&/g')>[[:space:]]*$"; then
+		   grep -qiE "^Signed-off-by:.*<$esc_email>[[:space:]]*$"; then
 			assisted="$assisted $sha"
 			if is_protected "$remote_ref"; then
 				protected_assisted="$protected_assisted $sha"
 			fi
 		fi
 
-		if git show -s --format=%B "$sha" |
-		   grep -qiE "^Signed-off-by:.*<$(printf '%s' "$email" | sed 's/[].[^$*\/]/\\&/g')>[[:space:]]*$"; then
-			continue
-		fi
+		# Cryptographic signatures are independent of DCO trailers.
 		if [ "$require_sig" = "1" ]; then
 			case "$(git log -1 --format='%G?' "$sha" 2>/dev/null || echo N)" in
 			G|U) ;;
 			*) unsigned_sig="$unsigned_sig $sha"; sigcount=$((sigcount + 1)) ;;
 			esac
+		fi
+		if git show -s --format=%B "$sha" |
+		   grep -qiE "^Signed-off-by:.*<$esc_email>[[:space:]]*$"; then
+			continue
 		fi
 		if is_protected "$remote_ref"; then
 			unsigned="$unsigned $sha"
