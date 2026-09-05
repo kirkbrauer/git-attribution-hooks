@@ -112,6 +112,24 @@ Co-Authored-By: Claude <noreply@anthropic.com>" \
 Assisted-by: Claude
 $SOB"
 
+check "claude code session-url trailer is stripped" \
+"fix: c2
+
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01ABCDEF" \
+"fix: c2
+
+Assisted-by: Claude:claude-opus-5
+$SOB"
+
+check "session trailer stripped even with no co-author" \
+"fix: c3
+
+Claude-Session: https://claude.ai/code/session_01ABCDEF" \
+"fix: c3
+
+$SOB"
+
 check "codex carries no model" \
 "fix: d
 

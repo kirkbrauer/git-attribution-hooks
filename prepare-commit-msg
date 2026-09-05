@@ -146,6 +146,10 @@ awk -v overrides="$overrides" '
 			print "Assisted-by: " agent_name ":" model
 		next
 	}
+	# Claude Code appends a session-URL trailer; the kernel AI-assistance format
+	# defines no such field, so drop it -- commit trailers stay Assisted-by +
+	# Signed-off-by. Case-insensitive; other agents add no session line.
+	/^[Cc]laude-[Ss]ession:[ \t]/ { next }
 	{ print }
 ' "$msg_file" >"$tmp"
 cat "$tmp" >"$msg_file"
