@@ -63,12 +63,21 @@ if [ "$policy" = "human" ]; then
 	esac
 fi
 
+# Codex displays updatedInput and includes it in the conversation. Only rewrite
+# commands that may create a new commit; ordinary calls must succeed silently.
+# This is deliberately a broad text match like the bypass checks above: it
+# covers compound commands, Git options, and scripts containing git commit.
+# Aliases/wrappers without these words retain native/trailer/config attribution.
 # Codex supplies the active model in PreToolUse input. Preserve tool arguments
 # and shell-quote metadata as data. Do not emit an allow decision for Claude:
 # that would bypass its normal permissions. Claude uses trailer/config model
 # information; Pi injects its own per-call context after calling this guard.
 if [ "${1:-}" = codex ] &&
    [ "$(printf '%s' "$input" | jq -r '.tool_name // ""')" = Bash ]; then
+	case "$cmd" in
+	*git*commit*) ;;
+	*) exit 0 ;;
+	esac
 	agent=codex
 	printf '%s' "$input" | jq --arg agent "$agent" '{
 		hookSpecificOutput: {

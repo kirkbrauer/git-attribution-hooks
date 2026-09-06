@@ -37,16 +37,34 @@ test("Claude and Codex share the bypass guard without executing the command", ()
   assert.equal(JSON.parse(guard("git-signoff -y", "codex")).hookSpecificOutput.permissionDecision, "deny");
 });
 
-test("Codex transports the active model safely and preserves tool arguments", () => {
+test("Codex leaves routine calls silent without rewriting their input", () => {
+  policy("auto");
+  for (const command of ["pwd", "rg --files", "cat README.md", "npm test", "git status",
+    "git diff", "git log -5", "git add README.md", "git push origin feature/test",
+    "git signoff --yes", 'printf %s "$GIT_ATTRIBUTION_MODEL"']) {
+    assert.equal(guard(command, "codex", { model: "gpt-test" }), "", command);
+  }
+  assert.equal(guard("git commit -m test", "codex", { tool_name: "Other" }), "");
+});
+
+test("Codex transports the active model only for commits and preserves tool arguments", () => {
   policy("auto");
   const model = "model'; touch SHOULD_NOT_EXIST; #";
-  const output = JSON.parse(guard('printf %s "$GIT_ATTRIBUTION_MODEL"', "codex", { model })).hookSpecificOutput;
+  // A shell function lets us inspect the environment without creating a commit.
+  const command = 'git() { printf "%s:%s" "$GIT_ATTRIBUTION_AGENT" "$GIT_ATTRIBUTION_MODEL"; }; git commit -m test';
+  const output = JSON.parse(guard(command, "codex", { model })).hookSpecificOutput;
   assert.equal(output.permissionDecision, "allow");
   assert.equal(output.updatedInput.timeout, 30);
-  assert.equal(run("sh", ["-c", output.updatedInput.command]), model);
+  assert.ok(output.updatedInput.command.endsWith("\n" + command));
+  assert.equal(run("sh", ["-c", output.updatedInput.command]), "codex:" + model);
   assert.equal(existsSync(join(work, "SHOULD_NOT_EXIST")), false);
-  const next = JSON.parse(guard('printf %s "$GIT_ATTRIBUTION_MODEL"', "codex", { model: "new-model" })).hookSpecificOutput;
-  assert.equal(run("sh", ["-c", next.updatedInput.command]), "new-model");
+  const next = JSON.parse(guard(command, "codex", { model: "new-model" })).hookSpecificOutput;
+  assert.equal(run("sh", ["-c", next.updatedInput.command]), "codex:new-model");
+  for (const command of ["git commit --amend --no-edit", "git -C repo commit -m test",
+    "git add . && git commit -m test", "git status\ngit commit -m test",
+    '/usr/bin/git -c user.name=Test commit -m test']) {
+    assert.ok(JSON.parse(guard(command, "codex")).hookSpecificOutput.updatedInput.command.endsWith("\n" + command));
+  }
 });
 
 test("Codex installer preserves settings, migrates legacy hook, handles quoted paths, and uninstalls", () => {
@@ -67,8 +85,11 @@ test("Codex installer preserves settings, migrates legacy hook, handles quoted p
   const commands = updated.hooks.PreToolUse.flatMap((group) => group.hooks.map((hook) => hook.command));
   assert.equal(commands.length, 2);
   const cmd = commands.find((command) => command.includes("block-dco-bypass.sh"));
-  const result = JSON.parse(run("sh", ["-c", cmd], {
+  assert.equal(run("sh", ["-c", cmd], {
     input: JSON.stringify({ cwd: work, tool_name: "Bash", model: "gpt-test", tool_input: { command: "git status" } }),
+  }), "");
+  const result = JSON.parse(run("sh", ["-c", cmd], {
+    input: JSON.stringify({ cwd: work, tool_name: "Bash", model: "gpt-test", tool_input: { command: "git commit -m test" } }),
   }));
   assert.match(result.hookSpecificOutput.updatedInput.command, /gpt-test/);
   assert.ok(existsSync(settings + ".bak"));

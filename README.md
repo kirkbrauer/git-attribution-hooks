@@ -228,10 +228,16 @@ was disabled, re-enable it in `/hooks` as well. Existing hooks and
 unrelated JSON are preserved, the previous file is saved as `hooks.json.bak`,
 and `--dir PATH` supports a non-default config directory.
 
-The same bypass guard is used as in Claude Code. On allowed Bash calls, the
-Codex adapter passes the hook event's active `model` into the shell via
+The same bypass guard is used as in Claude Code and checks every Bash call.
+Ordinary commands produce no hook output and keep their original command text.
+Only commands containing `git` followed by `commit` receive the hook event's
+active `model` via
 `GIT_ATTRIBUTION_AGENT=codex` and `GIT_ATTRIBUTION_MODEL`. This follows model
-switches without parsing config files or private transcripts. Native
+switches without parsing config files or private transcripts, while keeping
+attribution exports out of routine tool displays and model context. The text
+match also covers compound commands and Git options, but can match quoted text;
+aliases and wrapper scripts without those words use native detection and the
+model in a co-author trailer or `attribution.codex.model` instead. Native
 `CODEX_THREAD_ID`, `CODEX_SESSION_ID`, and `CODEX_SANDBOX` markers also detect
 Codex without the adapter, but may not supply a model.
 
