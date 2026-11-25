@@ -273,6 +273,9 @@ model metadata. Amends and replays are not relabeled with the current model.
 | Copilot | `Co-authored-by: Copilot <…+Copilot@users.noreply.github.com>` | `Assisted-by: Copilot` |
 | Cursor | `Co-authored-by: Cursor Agent <cursoragent@cursor.com>` | `Assisted-by: Cursor` |
 | aider | `Co-authored-by: aider (gpt-4o) <aider@aider.chat>` | `Assisted-by: aider:gpt-4o` |
+| DeepSeek | `Co-authored-by: DeepSeek V4.1 Flash <noreply@deepseek.com>` | `Assisted-by: DeepSeek:v4.1-flash` |
+| Gemini Code Assist | `Co-authored-by: gemini-code-assist[bot] <…+gemini-code-assist[bot]@users.noreply.github.com>` | `Assisted-by: Gemini` |
+| Devin | `Co-authored-by: … <…+devin-ai-integration[bot]@users.noreply.github.com>` | `Assisted-by: Devin` |
 
 Model priority is: explicit trailer model, current matching harness metadata,
 then `attribution.<agent>.model`. If none is known, emit the harness name alone
@@ -290,6 +293,22 @@ Claude Code also appends a `Claude-Session:` trailer linking back to the chat
 session. The kernel AI-assistance format defines no such field, so the hook
 drops it — commit trailers stay `Assisted-by:` + `Signed-off-by:`.
 
+### Stripping attribution instead
+
+To keep AI attribution out of commit messages altogether:
+
+```sh
+git config --global attribution.trailers strip
+```
+
+This removes every `Assisted-by:`, co-author trailers from known agents, and
+agent session trailers (`Claude-Session:`, `Session-Id:`, `Session-URL:`,
+`Codex-Session-Id:`, ...), and adds no attribution of its own. Human co-authors
+stay. Replayed commits are stripped too, and merge messages are cleaned rather
+than skipped. It is independent of `attribution.signoff`.
+
+Under the default `assisted-by`:
+
 **Leave your agents' attribution enabled.** In particular, Claude's default
 trailer carries the model. Native session detection is a fallback for missing
 trailers, not a way to reconstruct which models helped before this commit.
@@ -300,6 +319,7 @@ Any git config scope, so you can vary it per repo.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
+| `attribution.trailers` | `assisted-by` | `strip` removes `Assisted-by`, agent co-author and agent session trailers instead of converting them, and adds none (merge commits included) |
 | `attribution.signoff` | `auto` | `auto` = always sign, review before merge; `human` = never sign an agent's commit, certify later with `git signoff`; `off` = never sign |
 | `attribution.push.confirm` | `never` | `never` = no prompt; `always` = confirm any push carrying an assisted, already-signed commit; `protected` = only for `main` etc. |
 | `attribution.push.agent` | `allow` | `deny` refuses any push made from a coding agent's session, whatever its sign-off state |
@@ -372,7 +392,8 @@ these hooks simply don't run there.
 
 ## Notes
 
-- Merge commits are never rewritten and never signed off.
+- Merge commits are never signed off, and are rewritten only to strip trailers
+  under `attribution.trailers strip`.
 - The sign-off uses the identity git resolves *for the current repo*, so a
   repo-local `user.email` wins over your global one.
 - Re-running on an already-converted message is a no-op, so `--amend` and

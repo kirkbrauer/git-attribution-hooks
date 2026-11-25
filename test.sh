@@ -200,6 +200,63 @@ $SOB" \
 Assisted-by: Claude:claude-opus-5
 $SOB"
 
+echo "# strip mode"
+
+git config attribution.trailers strip
+git config attribution.signoff off
+check "strip drops assisted-by, agent co-authors and session trailers" \
+"fix: s1
+
+Body stays. Session: prose is not a trailer.
+
+Assisted-by: Claude:claude-opus-5
+assisted-by: Codex
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+Co-authored-by: Codex <noreply@openai.com>
+Co-authored-by: DeepSeek V4.1 Flash <noreply@deepseek.com>
+Claude-Session: https://claude.ai/code/session_01ABCDEF
+Codex-Session-Id: abc
+Session-Id: def
+Co-authored-by: Dana Lee <dana@anthropic.com>
+Reviewed-by: Dana Lee <dana@example.com>" \
+"fix: s1
+
+Body stays. Session: prose is not a trailer.
+
+Co-authored-by: Dana Lee <dana@anthropic.com>
+Reviewed-by: Dana Lee <dana@example.com>"
+
+AS_AGENT=1
+check "strip adds no attribution or sign-off in an agent session" \
+"fix: s2" "fix: s2"
+AS_AGENT=0
+
+git config attribution.robot.match "@robot[.]example$"
+git config attribution.robot.name "Robot"
+check "strip covers agents registered from config" \
+"fix: s3
+
+Co-authored-by: Robot <bot@robot.example>" "fix: s3"
+git config --unset attribution.robot.match
+git config --unset attribution.robot.name
+
+git checkout -q -b strip-side HEAD~1
+commit_with "fix: s4"
+git checkout -q -
+git merge -q --no-ff strip-side -m "merge: s5
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+Session-Id: abc" >/dev/null
+if [ "$(git log -1 --format=%B | sed '/^$/d')" = "merge: s5" ]; then
+	ok "strip cleans merge messages too"
+else
+	bad "strip cleans merge messages too"
+	git log -1 --format=%B | sed 's/^/    | /'
+fi
+git branch -q -D strip-side
+git config --unset attribution.signoff
+git config --unset attribution.trailers
+
 echo "# configuration"
 
 git config attribution.codex.model "gpt-5.1-codex"
